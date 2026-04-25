@@ -1,0 +1,553 @@
+import { createFileRoute } from '@tanstack/react-router'
+import { useState, useMemo, useEffect } from 'react'
+import { useMutation } from 'convex/react'
+import { api } from '../../convex/_generated/api'
+import { 
+  Plane, 
+  Users, 
+  Briefcase, 
+  Dog, 
+  Coffee, 
+  Wifi, 
+  Calendar,
+  MapPin,
+  Clock,
+  ChevronRight,
+  Check,
+  Plus,
+  Minus
+} from 'lucide-react'
+
+export const Route = createFileRoute('/')({
+  component: DFWCharterEstimator,
+  head: () => ({
+    meta: [{ title: 'DFW Charter Estimator | Private Jet Pricing' }]
+  })
+})
+
+const AIRCRAFT_CATEGORIES = [
+  { id: 'turboprop', name: 'Turboprop', model: 'King Air 350', pax: 9, maxBags: 8, hourlyRate: 4200, speed: 320 },
+  { id: 'light', name: 'Light Jet', model: 'Phenom 300 / CJ3', pax: 6, maxBags: 4, hourlyRate: 6000, speed: 430 },
+  { id: 'midsize', name: 'Midsize Jet', model: 'Citation XLS+', pax: 8, maxBags: 6, hourlyRate: 7500, speed: 440 },
+  { id: 'supermid', name: 'Super Midsize Jet', model: 'Citation Latitude', pax: 9, maxBags: 8, hourlyRate: 9800, speed: 450 },
+  { id: 'large', name: 'Large Cabin Jet', model: 'Challenger 350', pax: 9, maxBags: 8, hourlyRate: 12500, speed: 460 },
+  { id: 'heavy', name: 'Heavy Jet', model: 'Gulfstream G450 / G550', pax: 14, maxBags: 12, hourlyRate: 16500, speed: 480 },
+]
+
+function DFWCharterEstimator() {
+  const [departure, setDeparture] = useState('DFW')
+  const [destination, setDestination] = useState('')
+  const [date, setDate] = useState('')
+  const [passengers, setPassengers] = useState(1)
+  const [tripType, setTripType] = useState('one-way')
+  const [bags, setBags] = useState(0)
+  const [pets, setPets] = useState(false)
+  const [catering, setCatering] = useState('none')
+  const [wifi, setWifi] = useState(false)
+  const [selectedCategory, setSelectedCategory] = useState(AIRCRAFT_CATEGORIES[0].id)
+  
+  // Auto-switch aircraft if passenger count or baggage exceeds current selection
+  useEffect(() => {
+    const currentCat = AIRCRAFT_CATEGORIES.find(c => c.id === selectedCategory)
+    if (currentCat && (passengers > currentCat.pax || bags > currentCat.maxBags)) {
+      const firstAvailable = AIRCRAFT_CATEGORIES.find(c => c.pax >= passengers && c.maxBags >= bags)
+      if (firstAvailable) {
+        setSelectedCategory(firstAvailable.id)
+      }
+    }
+  }, [passengers, bags, selectedCategory])
+
+  const [showQuoteForm, setShowQuoteForm] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
+  
+  const createLead = useMutation(api.leads.create)
+
+  // Estimation Heuristics
+  const distance = useMemo(() => {
+    const dest = destination.toUpperCase()
+    if (dest === 'AUS') return 180
+    if (dest === 'HOU') return 240
+    if (dest === 'LAS') return 1050
+    if (dest === 'TEB' || dest === 'NYC') return 1400
+    if (dest === 'ASE') return 700
+    if (dest === 'MIA') return 1100
+    if (dest === 'LAX') return 1250
+    return 800 // default
+  }, [destination])
+
+  const estimate = useMemo(() => {
+    const category = AIRCRAFT_CATEGORIES.find(c => c.id === selectedCategory)!
+    const flightTimeHours = distance / category.speed + 0.5 
+    let basePrice = flightTimeHours * category.hourlyRate
+    
+    if (tripType === 'round-trip') {
+      basePrice *= 1.8
+    }
+    
+    const low = Math.round(basePrice * 0.9 / 100) * 100
+    const high = Math.round(basePrice * 1.1 / 100) * 100
+    
+    let tip = ""
+    const catId = category.id
+    
+    if (passengers > category.pax || bags > category.maxBags) {
+      const categoryIndex = AIRCRAFT_CATEGORIES.findIndex(c => c.id === catId)
+      const upgrade = AIRCRAFT_CATEGORIES.slice(categoryIndex + 1).find(c => c.pax >= passengers && c.maxBags >= bags)
+      
+      const reason = passengers > category.pax ? 'passenger count' : 'baggage volume'
+      tip = `Warning: Your ${reason} exceeds the capacity of a ${category.name}. We recommend upgrading to a ${upgrade ? upgrade.name : 'larger category'}.`
+    } else {
+      switch (catId) {
+        case 'turboprop':
+          tip = distance > 600 
+            ? "The King Air 350 is efficient, but for this distance, a Light Jet would save you significant travel time." 
+            : "Perfect choice for regional trips. The King Air 350 offers the best economics for short-range missions."
+          break
+        case 'light':
+          if (distance > 1200) {
+            tip = "On a trip this long, a Midsize Jet offers a stand-up cabin and more range to avoid potential fuel stops."
+          } else if (passengers > 5) {
+            tip = "With 6 passengers, a Light Jet cabin is at capacity. Consider a Midsize for more legroom and baggage space."
+          } else {
+            tip = "The Phenom 300 is the gold standard for efficiency and speed on missions under 3 hours."
+          }
+          break
+        case 'midsize':
+          if (distance > 2000) {
+            tip = "For transcontinental distances, a Super Midsize jet provides significantly more comfort and speed."
+          } else if (passengers <= 4 && distance < 500) {
+            tip = "For a short group flight, a Light Jet might offer better value while maintaining great comfort."
+          } else {
+            tip = "The Citation XLS+ is the most popular midsize jet, offering a great balance of cabin size and performance."
+          }
+          break
+        case 'supermid':
+          tip = "The Citation Latitude offers a flat floor and excellent performance, making it a favorite for business travel."
+          break
+        case 'large':
+          if (passengers <= 4 && distance < 800) {
+            tip = "The Challenger 350 is high-performance luxury. For this short trip, a Midsize Jet might be more cost-effective."
+          } else {
+            tip = "The Challenger 350 offers coast-to-coast range and a spacious flat-floor cabin for ultimate comfort."
+          }
+          break
+        case 'heavy':
+          if (distance < 500) {
+            tip = "A Heavy Jet is built for long-range. For a short hop, consider a Midsize or Super Midsize to reduce your hourly cost."
+          } else {
+            tip = "The G450/G550 is a world-class heavy jet, perfect for large groups or long-range domestic flights."
+          }
+          break
+      }
+    }
+    
+    return {
+      low,
+      high,
+      flightTime: `${Math.floor(flightTimeHours)}h ${Math.round((flightTimeHours % 1) * 60)}m`,
+      tip
+    }
+  }, [selectedCategory, distance, tripType, passengers, bags])
+
+  const handleQuoteSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    const formData = new FormData(e.currentTarget)
+    const name = formData.get('name') as string
+    const email = formData.get('email') as string
+    const phone = formData.get('phone') as string
+
+    await createLead({
+      name,
+      email,
+      phone,
+      departure,
+      destination,
+      date,
+      passengers,
+      tripType,
+      aircraftCategory: selectedCategory,
+      bags,
+      pets,
+      catering,
+      wifi,
+      estimateRange: `$${estimate.low.toLocaleString()} - $${estimate.high.toLocaleString()}`,
+    })
+
+    setSubmitted(true)
+    setTimeout(() => {
+      setShowQuoteForm(false)
+      setSubmitted(false)
+    }, 5000)
+  }
+
+  const selectedAircraft = AIRCRAFT_CATEGORIES.find(c => c.id === selectedCategory)
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-blue-500/30">
+      <header className="border-b border-white/10 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50">
+        <div className="max-w-6xl mx-auto px-6 h-20 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
+              <Plane className="text-white w-6 h-6" />
+            </div>
+            <span className="text-xl font-bold tracking-tight">DFW Charter Estimator</span>
+          </div>
+          <div className="hidden md:flex gap-6 text-sm font-medium text-slate-400">
+            <a href="#" className="hover:text-white transition-colors">Safety</a>
+            <a href="#" className="hover:text-white transition-colors">Fleet</a>
+            <a href="#" className="hover:text-white transition-colors">About</a>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-6xl mx-auto px-6 py-12">
+        <div className="grid lg:grid-cols-2 gap-12 items-start">
+          <section className="space-y-8">
+            <div>
+              <h1 className="text-4xl font-extrabold mb-4 bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">
+                Estimate Your Next Journey
+              </h1>
+              <p className="text-slate-400">Instant private jet charter estimates departing from DFW and surrounding airports.</p>
+            </div>
+
+            <div className="bg-slate-900/50 border border-white/5 rounded-3xl p-8 space-y-6 shadow-2xl">
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Departure Airport</label>
+                  <div className="relative">
+                    <MapPin className="absolute left-3 top-3 w-4 h-4 text-slate-500" />
+                    <input 
+                      value={departure}
+                      onChange={e => setDeparture(e.target.value)}
+                      placeholder="e.g. DFW or DAL"
+                      className="w-full bg-slate-800 border border-white/5 rounded-xl py-2.5 pl-10 pr-4 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Destination Airport</label>
+                  <div className="relative">
+                    <MapPin className="absolute left-3 top-3 w-4 h-4 text-slate-500" />
+                    <input 
+                      value={destination}
+                      onChange={e => setDestination(e.target.value)}
+                      placeholder="e.g. LAS, TEB, ASE"
+                      className="w-full bg-slate-800 border border-white/5 rounded-xl py-2.5 pl-10 pr-4 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Travel Date</label>
+                  <div className="relative">
+                    <Calendar className="absolute left-3 top-3 w-4 h-4 text-slate-500" />
+                    <input 
+                      type="date"
+                      value={date}
+                      onChange={e => setDate(e.target.value)}
+                      className="w-full bg-slate-800 border border-white/5 rounded-xl py-2.5 pl-10 pr-4 focus:ring-2 focus:ring-blue-500 outline-none transition-all text-sm"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Passengers</label>
+                  <div className="flex items-center gap-3">
+                    <button 
+                      onClick={() => setPassengers(Math.max(1, passengers - 1))}
+                      className="w-10 h-10 bg-slate-800 rounded-xl flex items-center justify-center hover:bg-slate-700 border border-white/5 transition-colors"
+                    >
+                      <Minus className="w-4 h-4" />
+                    </button>
+                    <div className="flex-1 bg-slate-800 border border-white/5 rounded-xl py-2.5 text-center font-bold">
+                      {passengers}
+                    </div>
+                    <button 
+                      onClick={() => setPassengers(Math.min(19, passengers + 1))}
+                      className="w-10 h-10 bg-slate-800 rounded-xl flex items-center justify-center hover:bg-slate-700 border border-white/5 transition-colors"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Trip Type</label>
+                  <select 
+                    value={tripType}
+                    onChange={e => setTripType(e.target.value)}
+                    className="w-full bg-slate-800 border border-white/5 rounded-xl py-2.5 px-4 focus:ring-2 focus:ring-blue-500 outline-none transition-all appearance-none"
+                  >
+                    <option value="one-way">One Way</option>
+                    <option value="round-trip">Round Trip</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-4 pt-4 border-t border-white/5">
+                <h3 className="text-sm font-bold text-slate-300">Aircraft Category</h3>
+                <div className="grid grid-cols-1 gap-3">
+                  {AIRCRAFT_CATEGORIES.map(cat => {
+                    const isPaxDisabled = passengers > cat.pax
+                    const isBagsDisabled = bags > cat.maxBags
+                    const isDisabled = isPaxDisabled || isBagsDisabled
+                    
+                    return (
+                      <button
+                        key={cat.id}
+                        disabled={isDisabled}
+                        onClick={() => setSelectedCategory(cat.id)}
+                        className={`flex items-center justify-between p-4 rounded-xl border transition-all ${
+                          isDisabled 
+                            ? 'opacity-40 cursor-not-allowed grayscale bg-slate-900/30 border-transparent'
+                            : selectedCategory === cat.id 
+                              ? 'bg-blue-600/20 border-blue-500' 
+                              : 'bg-slate-800/50 border-white/5 hover:border-white/10'
+                        }`}
+                      >
+                        <div className="text-left">
+                          <div className="font-bold flex items-center gap-2">
+                            {cat.name}
+                            {isDisabled && (
+                              <span className="text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded font-bold uppercase">
+                                {isPaxDisabled ? 'Exceeds Pax' : 'Exceeds Bags'}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-slate-400">{cat.model}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-xs text-slate-500 leading-relaxed">
+                            Max {cat.pax} Pax<br/>
+                            Max {cat.maxBags} Bags
+                          </div>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-6 pt-4 border-t border-white/5">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Briefcase className="w-4 h-4 text-slate-500" />
+                      <span className="text-sm">Baggage (items)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={() => setBags(Math.max(0, bags - 1))}
+                        className="w-8 h-8 bg-slate-800 rounded-lg flex items-center justify-center hover:bg-slate-700 border border-white/5 transition-colors"
+                      >
+                        <Minus className="w-3 h-3" />
+                      </button>
+                      <span className="w-6 text-center text-sm font-bold">{bags}</span>
+                      <button 
+                        onClick={() => setBags(bags + 1)}
+                        className="w-8 h-8 bg-slate-800 rounded-lg flex items-center justify-center hover:bg-slate-700 border border-white/5 transition-colors"
+                      >
+                        <Plus className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Dog className="w-4 h-4 text-slate-500" />
+                      <span className="text-sm">Pets on board</span>
+                    </div>
+                    <button 
+                      onClick={() => setPets(!pets)}
+                      className={`w-12 h-6 rounded-full transition-all relative ${pets ? 'bg-blue-600' : 'bg-slate-700'}`}
+                    >
+                      <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${pets ? 'left-7' : 'left-1'}`} />
+                    </button>
+                  </div>
+                </div>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Wifi className="w-4 h-4 text-slate-500" />
+                      <span className="text-sm">Wi-Fi Required</span>
+                    </div>
+                    <button 
+                      onClick={() => setWifi(!wifi)}
+                      className={`w-12 h-6 rounded-full transition-all relative ${wifi ? 'bg-blue-600' : 'bg-slate-700'}`}
+                    >
+                      <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${wifi ? 'left-7' : 'left-1'}`} />
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Coffee className="w-4 h-4 text-slate-500" />
+                      <span className="text-sm">Catering</span>
+                    </div>
+                    <select 
+                      value={catering}
+                      onChange={e => setCatering(e.target.value)}
+                      className="bg-slate-800 border border-white/5 rounded-xl py-1.5 px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer text-slate-200 min-w-[100px]"
+                    >
+                      <option value="none" className="bg-slate-900">None</option>
+                      <option value="light" className="bg-slate-900">Light</option>
+                      <option value="full" className="bg-slate-900">Full</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="lg:sticky lg:top-32 space-y-6">
+            <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-3xl p-8 text-white shadow-xl overflow-hidden relative">
+              <div className="absolute top-0 right-0 p-8 opacity-10">
+                <Plane className="w-48 h-48 rotate-12" />
+              </div>
+              
+              <div className="relative z-10">
+                <div className="text-blue-100 text-sm font-bold uppercase tracking-widest mb-2">Estimated Range</div>
+                <div className="text-5xl font-black mb-6">
+                  ${estimate.low.toLocaleString()} - ${estimate.high.toLocaleString()}
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4 mb-8">
+                  <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4">
+                    <div className="flex items-center gap-2 text-blue-100 text-xs font-bold mb-1">
+                      <Clock className="w-3 h-3" /> Flight Time
+                    </div>
+                    <div className="text-xl font-bold">{estimate.flightTime}</div>
+                  </div>
+                  <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4">
+                    <div className="flex items-center gap-2 text-blue-100 text-xs font-bold mb-1">
+                      <Users className="w-3 h-3" /> Passengers
+                    </div>
+                    <div className="text-xl font-bold">{passengers}</div>
+                  </div>
+                </div>
+
+                <div className="bg-black/20 rounded-2xl p-4 mb-8">
+                  <h4 className="text-xs font-bold text-blue-100 uppercase mb-2">Aircraft Tip</h4>
+                  <p className="text-sm text-blue-50">
+                    {estimate.tip}
+                  </p>
+                </div>
+
+                <button 
+                  onClick={() => setShowQuoteForm(true)}
+                  className="w-full bg-white text-blue-600 font-bold py-4 rounded-2xl hover:bg-blue-50 transition-colors shadow-lg flex items-center justify-center gap-2 group"
+                >
+                  Request a Real Quote
+                  <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-slate-900/50 border border-white/5 rounded-3xl p-6">
+              <h4 className="text-sm font-bold mb-4">What's included?</h4>
+              <ul className="space-y-3">
+                {[
+                  'Full aircraft charter',
+                  'Professional flight crew',
+                  'VIP terminal access (FBO)',
+                  'Basic refreshments',
+                  'Landing & handling fees'
+                ].map(item => (
+                  <li key={item} className="flex items-center gap-3 text-sm text-slate-400">
+                    <div className="w-5 h-5 rounded-full bg-blue-500/20 flex items-center justify-center">
+                      <Check className="w-3 h-3 text-blue-400" />
+                    </div>
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </section>
+        </div>
+      </main>
+
+      {showQuoteForm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={() => !submitted && setShowQuoteForm(false)} />
+          <div className="relative w-full max-w-lg bg-slate-900 border border-white/10 rounded-3xl p-8 shadow-2xl animate-in fade-in zoom-in duration-300 max-h-[90vh] overflow-y-auto">
+            {submitted ? (
+              <div className="text-center py-12 space-y-4">
+                <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                  <Check className="w-8 h-8 text-green-500" />
+                </div>
+                <h2 className="text-2xl font-bold">Request Received</h2>
+                <p className="text-slate-400">We’ll connect you with a charter specialist within 2 hours.</p>
+              </div>
+            ) : (
+              <>
+                <div className="mb-8">
+                  <h2 className="text-2xl font-bold mb-2">Finalize Your Quote</h2>
+                  <p className="text-slate-400 text-sm">Review your trip details and enter your contact information.</p>
+                </div>
+
+                <div className="bg-slate-800/50 rounded-2xl p-6 mb-8 border border-white/5 space-y-4 text-sm">
+                  <div className="flex justify-between border-b border-white/5 pb-2">
+                    <span className="text-slate-500">Route</span>
+                    <span className="font-bold">{departure || 'TBD'} → {destination || 'TBD'}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-white/5 pb-2">
+                    <span className="text-slate-500">Aircraft</span>
+                    <span className="font-bold">{selectedAircraft?.name} ({selectedAircraft?.model})</span>
+                  </div>
+                  <div className="flex justify-between border-b border-white/5 pb-2">
+                    <span className="text-slate-500">Details</span>
+                    <span className="font-bold">{passengers} Pax • {bags} Bags • {tripType === 'round-trip' ? 'Round Trip' : 'One Way'}</span>
+                  </div>
+                  <div className="flex justify-between pt-2">
+                    <span className="text-slate-500">Est. Range</span>
+                    <span className="text-blue-400 font-bold">${estimate.low.toLocaleString()} - ${estimate.high.toLocaleString()}</span>
+                  </div>
+                </div>
+
+                <form onSubmit={handleQuoteSubmit} className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Full Name</label>
+                    <input required name="name" className="w-full bg-slate-800 border border-white/5 rounded-xl py-2.5 px-4 outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Email Address</label>
+                    <input required type="email" name="email" className="w-full bg-slate-800 border border-white/5 rounded-xl py-2.5 px-4 outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Phone Number</label>
+                    <input required type="tel" name="phone" className="w-full bg-slate-800 border border-white/5 rounded-xl py-2.5 px-4 outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                  </div>
+                  <div className="pt-4">
+                    <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-blue-600/20">
+                      Submit Quote Request
+                    </button>
+                    <button 
+                      type="button" 
+                      onClick={() => setShowQuoteForm(false)}
+                      className="w-full text-slate-500 text-sm mt-4 hover:text-slate-300 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      <footer className="border-t border-white/5 py-12 mt-12 bg-slate-900/30">
+        <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-8">
+          <div className="flex items-center gap-2 opacity-50">
+            <Plane className="w-5 h-5" />
+            <span className="font-bold">DFW Charter Estimator</span>
+          </div>
+          <p className="text-slate-500 text-sm">© 2024 DFW Charter Estimator. Pricing is for estimation purposes only.</p>
+          <div className="flex gap-6 text-slate-400">
+            <a href="#" className="hover:text-white transition-colors"><Wifi className="w-4 h-4" /></a>
+            <a href="#" className="hover:text-white transition-colors"><Briefcase className="w-4 h-4" /></a>
+            <a href="#" className="hover:text-white transition-colors"><Users className="w-4 h-4" /></a>
+          </div>
+        </div>
+      </footer>
+    </div>
+  )
+}
